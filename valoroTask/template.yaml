@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM Template for Valoro Task API
+
+Parameters:
+  DBSecretName:
+    Description: Name of the Secrets Manager secret which containers the Database details
+    Type: String
+  ValoroTaskDBSchemaStackName:
+    Description: Name of the Valoro Task DB schema Cloudformation stack
+    Type: String
+  DBEntryPoint:
+    Description: Entry Point Link
+    Type: String
+
+Globals:
+  Function:
+    Timeout: 30
+
+Resources:
+  GroupsLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: group/
+      Handler: main.lambda_handler
+      Runtime: python3.8
+      Layers:
+        - {'Fn::ImportValue': !Sub '${ValoroTaskDBSchemaStackName}-DBSchemaLambdaLayerArn'}
+      Role: !GetAtt LambdaRole.Arn
+      Environment:
+        Variables:
+          DB_SECRET_NAME: !Ref DBSecretName
+          DB_PROXY_ENDPOINT: !Ref DBEntryPoint
+      Events:
+        ListGroups:
+          Type: Api
+          Properties:
+            Path: /group
+            Method: get
+        AddGroup:
+          Type: Api
+          Properties:
+            Path: /group
+            Method: post
+        UpdateGroup:
+          Type: Api
+          Properties:
+            Path: /group
+            Method: put
+  
+  RepliesLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: reply/
+      Handler: main.lambda_handler
+      Runtime: python3.8
+      Layers:
+        - {'Fn::ImportValue': !Sub '${ValoroTaskDBSchemaStackName}-DBSchemaLambdaLayerArn'}
+      Role: !GetAtt LambdaRole.Arn
+      Environment:
+        Variables:
+          DB_SECRET_NAME: !Ref DBSecretName
+          DB_PROXY_ENDPOINT: !Ref DBEntryPoint
+      Events:
+        ListReplies:
+          Type: Api
+          Properties:
+            Path: /reply
+            Method: get
+        AddReply:
+          Type: Api
+          Properties:
+            Path: /reply
+            Method: post
+        UpdateReply:
+          Type: Api
+          Properties:
+            Path: /reply
+            Method: put
+
+  # Lambda function role
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: create-schema-lambda-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:PutResourcePolicy
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:TagResource
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:ListSecrets
+                  - secretsmanager:GetRandomPassword
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${DBSecretName}*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+Outputs:
+
+  GroupsLambdaFunction:
+    Description: Valoro Task database schema Lambda Arn
+    Value: !Ref GroupsLambdaFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-GroupsLambdaArn'
+
+  RepliesLambdaFunction:
+    Description: Valoro Task database schema Lambda Arn
+    Value: !Ref RepliesLambdaFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-RepliesLambdaArn'
+
+  ValoroAPIEndpoint:
+    Description: Groups API Endpoint
+    # ServerlessRestApi and ServerlessRestApiProdStage are implicit resources created by SAM and referenced here
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/${ServerlessRestApiProdStage}"
+    Export:
+      Name: !Sub '${AWS::StackName}-ValoroAPIEndpoint'

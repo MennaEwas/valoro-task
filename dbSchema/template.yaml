@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Create the database schema for Valoro via a schema Lambda and Lambda Layer
+
+Parameters:
+  DBSecretName:
+    Description: Name of the Database secret
+    Type: String
+  DBEntryPoint:
+    Description: Entry Point Link
+    Type: String
+
+Resources:
+
+  # Triggers DB schema creation
+  ValoroTaskDBSchemaLambdaFunctionTrigger:
+    Type: Custom::ValoroTaskDBSchemaLambdaFunction
+    Version: "1.0"
+    Properties:
+      ServiceToken: !GetAtt ValoroTaskDBSchemaLambdaFunction.Arn
+
+  # Lambda function that will create the DB schema from SQLAlchemy models defined in the Lambda Layer
+  ValoroTaskDBSchemaLambdaFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      FunctionName: schema_creation_lambda
+      CodeUri: ./db_schema_lambda/
+      Handler: main.lambda_handler
+      Runtime: python3.8
+      Timeout: 30
+      Layers:
+        - !Ref ValoroTaskDBSchemaLambdaLayer
+      Role: !GetAtt ValoroTaskDBSchemaLambdaFunctionRole.Arn
+      Environment:
+        Variables:
+          DB_SECRET_NAME: !Ref DBSecretName
+          DB_PROXY_ENDPOINT: !Ref DBEntryPoint
+
+    
+
+  # Lambda function role
+  ValoroTaskDBSchemaLambdaFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: create-schema-lambda-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:PutResourcePolicy
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:TagResource
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:ListSecrets
+                  - secretsmanager:GetRandomPassword
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${DBSecretName}*"
+              - Effect: Allow
+                Action:
+                  - rds-db:connect
+                Resource: "arn:aws:rds:us-west-2:642858812510:db:valoro"            
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # Lambda layer that contains the SQLAlchemy ORM objects that will be used to create the schema and access the DB
+  ValoroTaskDBSchemaLambdaLayer:
+      Type: AWS::Serverless::LayerVersion
+      Properties:
+          LayerName: sqlalchemy-models-lambda-layer
+          Description: SQLAlchemy models and utilities for the Valoro Task
+          ContentUri: ./db_schema_lambda_layer/
+          CompatibleRuntimes:
+            - python3.8
+          LicenseInfo: 'MIT'
+          RetentionPolicy: Retain
+
+Outputs:
+  ValoroTaskDBSchemaLambdaArn:
+    Description: Valoro Task database schema Lambda Arn
+    Value: !Ref ValoroTaskDBSchemaLambdaFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-DBSchemaLambdaArn'
+
+  ValoroTaskDBSchemaLambdaLayer:
+    Description: Valoro Task database schema Lambda layer Arn
+    Value: !Ref ValoroTaskDBSchemaLambdaLayer
+    Export:
+      Name: !Sub '${AWS::StackName}-DBSchemaLambdaLayerArn'
