@@ -3,74 +3,74 @@ import logging
 from os import name
 import db_connection
 from valoro_orm_objects import Group
+from jsonschema import validate
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 session = db_connection.get_db_session()
+def lambda_response(res, httpStatusCode):
+    return {
+        "isBase64Encoded": False,
+        "statusCode": httpStatusCode,
+        "headers": { "Content-Type": "*/*", " Access-Control-Allow-Origin:": "*"},
+        "body": res
+    }
 
 def get_groups():
     try:
         groups = session.query(Group)
         results = [
-            { "id": group.id,
-              "name": group.name,
-              "img": group.img,
-              "cost": group.cost,
-              "description": group.description,
-              "capacity": group.capacity
-            }
+            group.format()
             for group in groups
         ]
-
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "groups": results
-            })
-        }
+        return lambda_response(json.dumps({"groups": results}), 200)
     except Exception as e:
-        logger.debug(e)
-        return {
-            "statusCode": 500,
-            "error": f"Error: {e}"
-        }
+        return lambda_response(json.dumps({"error": f"Error: {e}"}), 500)
+
 
 
 def add_group(event):
     try:
         req = json.loads(event['body'])
-        group = Group(
-            name=req['name'],
-            img=req['img'],
-            description=req['description'],
-            capacity=int(req['capacity']),
-            cost = float(req['cost']),
-            groupTypeId = int(req['group_type_id'])
-        )
+        validate(instance=req, schema=Group.validationSchema())
+        group = Group()
+        if 'name' in req:
+            group.name = req['name']
+        if 'description' in req:
+            group.group_description = req['description']
+        if 'img' in req:
+            group.img = req['img']
+        if 'capacity' in req:
+            group.capacity = req['capacity']
+        if 'cost' in req:
+            group.cost = req['cost']
+        if 'group_type_id' in req:
+            group.group_type_id = req['group_type_id'] 
+        
         logger.debug(f"Inserting: {group}")
         session.add(group)
         session.commit()
 
-        return {
-            "statusCode": 200
-        }
+        return lambda_response(json.dumps(group.format()), 200)
     except Exception as e:
         logger.debug(e)
-        print(e)
-        return {
-            "statusCode": 500,
-            "error": f"Error: {e}"
-        }
+        return lambda_response(json.dumps({"error": f"Error: {e}"}), 500)
+
 
 def update_group(event):
     try:
         req = json.loads(event['body'])
-        group = Group.query.filter_by(name=req['name']).first()
+        group = session.query(Group).filter_by(id=req['id']).first()
+        if group is None:
+            return lambda_response(json.dumps({"error": "Not Found"}), 404)
+        
+        validate(instance=req, schema=Group.validationSchema())
+       
         if 'name' in req:
             group.name = req['name']
         if 'description' in req:
-            group.description = req['description']
+            group.group_description = req['description']
         if 'img' in req:
             group.img = req['img']
         if 'capacity' in req:
@@ -82,20 +82,12 @@ def update_group(event):
         
         logger.debug(f"Updating: {group}")
         session.commit()
-    
-        
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "group": group
-            })
-        }
+
+        return lambda_response(json.dumps(group.format()), 200)
     except Exception as e:
         logger.debug(e)
-        return {
-            "statusCode": 500,
-            "error": f"Error: {e}"
-        }
+        return lambda_response(json.dumps({"error": f"Error: {e}"}), 500)
+
 
 
 def lambda_handler(event, context):

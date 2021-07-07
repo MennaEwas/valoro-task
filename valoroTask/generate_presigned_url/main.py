@@ -2,12 +2,12 @@ import boto3
 import json
 import os
 import logging
-
+import uuid
+from botocore.client import Config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
 db_secret_name = os.getenv('DB_SECRET_NAME')
-db_proxy_endpoint = os.getenv('DB_PROXY_ENDPOINT')
 secrets_client = boto3.client('secretsmanager')
 
 # Get DB credentials from AWS Secrets Manager
@@ -19,33 +19,30 @@ def get_db_secrets():
     secrets = json.loads(secret_response['SecretString'])
     return secrets
 
+def lambda_response(res, httpStatusCode):
+    return {
+        "isBase64Encoded": False,
+        "statusCode": httpStatusCode,
+        "headers": { "Content-Type": "*/*", " Access-Control-Allow-Origin:": "*"},
+        "body": res
+    }
 
-def generate_presigned_url(event):
+def create_presigned_url(event):
     try:
         bucket_name = get_db_secrets()['bucketname']
-        region_name = boto3.session.Sesstion().region_name
-        req = json.loads(event['body'])
-
-        s3_client = boto3.client("s3", region_name=region_name)
-        fields = s3_client.generate_presigned_url('put_object',Params={'Bucket': bucket_name,'Key': req['file_name'],'ACL': 'public-read'},ExpiresIn=3600)
-        return {
-                "statusCode": 200,
-                "body": json.dumps({
-                        "fields": fields
-                })
-                }
+        file_name = uuid.uuid4().hex
+        s3_client = boto3.client("s3", config=Config(signature_version='s3v4'))
+        url = s3_client.generate_presigned_url('put_object',Params={'Bucket': bucket_name,'Key': file_name},ExpiresIn=3600, HttpMethod='PUT')
+        return lambda_response(json.dumps({"url": url, "file_name": file_name}), 200)
     except Exception as e:
         logger.debug(e)
-        return {
-            "statusCode": 500,
-            "error": f"Error: {e}"
-        }
+        return lambda_response(json.dumps({"error": f"Error: {e}"}), 500)
 
 def lambda_handler(event, context):
     
     logger.debug(event)
     if (event['httpMethod'] == 'GET'):
-        response = generate_presigned_url(event)
+        response = create_presigned_url(event)
     else:
         logger.debug(f"No handler for http verb: {event['httpMethod']}")
         raise Exception(f"No handler for http verb: {event['httpMethod']}")

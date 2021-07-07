@@ -77,6 +77,22 @@ Resources:
           Properties:
             Path: /reply
             Method: put
+  GeneratePreSignedUrl:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: generate_presigned_url/
+      Handler: main.lambda_handler
+      Runtime: python3.8
+      Role: !GetAtt LambdaRole.Arn
+      Environment:
+        Variables:
+          DB_SECRET_NAME: !Ref DBSecretName
+      Events:
+        GeneratePreSignedUrlS3:
+          Type: Api
+          Properties:
+            Path: /generateurl
+            Method: get
 
   # Lambda function role
   LambdaRole:
@@ -108,8 +124,18 @@ Resources:
                   - secretsmanager:ListSecrets
                   - secretsmanager:GetRandomPassword
                 Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${DBSecretName}*"
+        - PolicyName: S3Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                Resource: !Sub "arn:aws:s3:::uploadbucketgeekahmed/*"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+
 
 Outputs:
 
